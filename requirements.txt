@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+langchain
+openai
+sqlalchemy
+pydantic
+aiofiles
+langchain-community
+openai
