@@ -1,5 +1,7 @@
 # AI Assistant API
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Python](https://img.shields.io/badge/python-3.11-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.116-009688)
+
 A small FastAPI service that sends a user message to an OpenAI chat model through LangChain,
 keeps a per-session conversation memory, and logs each exchange in SQLite.
 
