@@ -92,7 +92,7 @@ flowchart LR
 
 `.env.example` documents the expected variable for local configuration and the existing Compose file. Keep actual keys in your environment or an ignored `.env` file. Runtime databases, virtual environments, and Python caches should stay outside version control. Adding `.gitignore` does not remove files already tracked by Git.
 
-The existing Docker startup copies the contents of `app/` to the container root and imports `main` as a top-level module. This conflicts with the application's relative imports. The container workflow needs to preserve the `app` package and import `app.main:app` before it is advertised as working. See [ROADMAP.md](ROADMAP.md).
+The existing Docker startup copies the contents of `app/` to the container root and imports `main` as a top-level module. This conflicts with the application's relative imports. The container workflow needs to preserve the `app` package and import `app.main:app` before it is advertised as working.
 
 The current API also exposes internal exception messages and has no implemented authentication or rate limits. These need attention before a shared public deployment.
 
@@ -100,7 +100,7 @@ The current API also exposes internal exception messages and has no implemented 
 
 Improve request validation and error handling, verify dependencies, fix container startup, and add API tests using a simulated model response. Then choose whether the product should remain a stateless chat API or support isolated conversation sessions.
 
-See [ROADMAP.md](ROADMAP.md) for completion criteria.
+Completion criteria: a verified container start, tests for the API route and storage layer, and error handling for a failed model call.
 
 Built by [Roxana Khaleghi](https://github.com/roxanakhaleghi67).
 
