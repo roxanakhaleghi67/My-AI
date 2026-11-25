@@ -1,25 +1,41 @@
 # AI Assistant API
 
-A Python API prototype that accepts a message, requests a response from a language model, and logs the exchange in SQLite. It explores a small application flow using FastAPI, LangChain, and SQLAlchemy.
+A small FastAPI service that sends a user message to an OpenAI chat model through LangChain,
+keeps a per-session conversation memory, and logs each exchange in SQLite.
 
-**Status:** API prototype. Dependency compatibility, error handling, and container startup still need verification.
+**Status:** working prototype. The API starts and answers `GET /health` without a key; a real
+`POST /chat` needs `OPENAI_API_KEY`. Automated tests are not included yet.
+
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Liveness probe; returns `{"status": "ok"}` without touching the model |
+| `POST` | `/chat` | Sends a message and returns the model reply, using the session memory |
+| `GET` | `/docs` | Interactive API documentation (Swagger UI) |
 
 ## Current implementation
 
-- `POST /chat` with request and response schemas.
-- A model call through the client in `app/agent.py`.
-- SQLite storage for the input and reply.
-- FastAPI's interactive API documentation.
+- `POST /chat` accepts `message` and an optional `session_id` (default `"default"`).
+- `app/agent.py` builds a `ConversationChain` with a `ConversationBufferMemory` **per session**,
+  so the model sees the earlier turns of that session.
+- The model client is created lazily, so importing the application never requires a key and
+  never performs network access.
+- Each exchange is stored in SQLite through SQLAlchemy (`app/db.py`).
+- `python-dotenv` is used when it is installed; otherwise the process environment is used.
 
-Each model request currently contains only the new user message. Stored conversations are not sent back to the model, so the current implementation is stateless from the model's perspective. Tool use, document retrieval, and a multi-step agent workflow are not implemented.
+Memory lives in the process and is lost on restart. The SQLite table stores the exchanges but
+has no session-id column, so this version cannot rebuild a session from the database. Tool use,
+document retrieval, and a multi-step agent workflow are not implemented.
 
 ## Project structure
 
 ```text
 app/
-  main.py     # API route and schemas
-  agent.py    # Language-model request
-  db.py       # Conversation storage
+  main.py      # FastAPI application: /chat, /health
+  agent.py     # lazy model client and per-session conversation memory
+  schemas.py   # request and response models
+  db.py        # SQLite storage
 Dockerfile
 docker-compose.yml
 requirements.txt
@@ -35,7 +51,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-The code reads `OPENAI_API_KEY` from the process environment. Set it before starting the server. One PowerShell option that avoids putting the key literally into command history is:
+Set the key in the environment, or copy `.env.example` to `.env` (the app loads `.env` when
+`python-dotenv` is installed):
 
 ```powershell
 $apiKeyInput = Read-Host "API key" -AsSecureString
@@ -43,36 +60,44 @@ $env:OPENAI_API_KEY = [System.Net.NetworkCredential]::new('', $apiKeyInput).Pass
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-Keep this terminal open while using the local server. Copying `.env.example` to `.env` alone does not load variables into this Python process; the current application does not load dotenv files itself.
+Open `http://127.0.0.1:8000/docs` to try the endpoints. Requests call an external model service
+and may incur charges.
 
-Open `http://127.0.0.1:8000/docs` to inspect and try the endpoint. Requests use the configured external model service and may incur charges. A valid key and access to the model configured in `app/agent.py` are required.
+## Docker
 
-The module path above matches the relative imports in the current code. A full launch and live model request have not yet been verified against a fresh dependency installation.
+The image imports the application as a package (`app.main:app`), which matches the relative
+imports in the code.
+
+```bash
+docker compose up --build
+```
+
+or manually:
+
+```bash
+docker build -t my-ai .
+docker run -p 8000:8000 -e OPENAI_API_KEY="..." my-ai
+```
 
 ## Request and response
-
-Request shape:
 
 ```http
 POST /chat
 Content-Type: application/json
 
-{"message": "Explain the difference between a list and a tuple in Python."}
+{"message": "Explain the difference between a list and a tuple in Python.", "session_id": "alice"}
 ```
-
-Response shape:
 
 ```json
 {"reply": "Model-generated text"}
 ```
 
-The response above illustrates the schema; it is not a saved model output.
-
-PowerShell example after the server starts:
+The reply above only illustrates the schema; it is not a saved model output.
 
 ```powershell
-$requestBody = @{ message = 'Explain a Python list in one sentence.' } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/chat' -ContentType 'application/json' -Body $requestBody
+$body = @{ message = 'Explain a Python list in one sentence.'; session_id = 'demo' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/chat' -ContentType 'application/json' -Body $body
+Invoke-RestMethod -Method Get -Uri 'http://127.0.0.1:8000/health'
 ```
 
 ## Request flow
@@ -80,27 +105,25 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8000/chat' -ContentType 'a
 ```mermaid
 flowchart LR
     A[Client] --> B[FastAPI POST /chat]
-    B --> C[Language-model client]
+    B --> C[ConversationChain]
+    C --> M[Session memory]
     C --> D[External model service]
     D --> C
-    C --> B
     B --> E[SQLite conversation log]
     B --> A
 ```
 
-## Configuration and repository hygiene
+## Configuration and security
 
-`.env.example` documents the expected variable for local configuration and the existing Compose file. Keep actual keys in your environment or an ignored `.env` file. Runtime databases, virtual environments, and Python caches should stay outside version control. Adding `.gitignore` does not remove files already tracked by Git.
-
-The existing Docker startup copies the contents of `app/` to the container root and imports `main` as a top-level module. This conflicts with the application's relative imports. The container workflow needs to preserve the `app` package and import `app.main:app` before it is advertised as working.
-
-The current API also exposes internal exception messages and has no implemented authentication or rate limits. These need attention before a shared public deployment.
+- `.env` is ignored by git; keep real keys there or in the process environment.
+- Internal exception messages are currently returned to the client, and there is no
+  authentication or rate limiting. Both are needed before a shared public deployment.
 
 ## Next steps
 
-Improve request validation and error handling, verify dependencies, fix container startup, and add API tests using a simulated model response. Then choose whether the product should remain a stateless chat API or support isolated conversation sessions.
-
-Completion criteria: a verified container start, tests for the API route and storage layer, and error handling for a failed model call.
+- Add tests for `/health`, `/chat` and the storage layer with a simulated model response.
+- Store the session id with each exchange so a session can be rebuilt after a restart.
+- Replace the deprecated `langchain_community.ChatOpenAI` import with `langchain_openai.ChatOpenAI`.
 
 Built by [Roxana Khaleghi](https://github.com/roxanakhaleghi67).
 
@@ -108,25 +131,39 @@ Built by [Roxana Khaleghi](https://github.com/roxanakhaleghi67).
 
 ## فارسی
 
-FastAPI + LangChain + Docker
+سرویس FastAPI + LangChain + SQLite برای چت با مدل زبانی، با حافظهٔ گفتگو برای هر نشست.
 
 ### ویژگی‌ها
-- Endpoint رست برای چت
-- ایجنت LangChain با OpenAI
-- ثبت مکالمات در پایگاه داده SQLite
-- آماده اجرا با Docker
+- endpoint چت (`POST /chat`) با `message` و `session_id` اختیاری
+- حافظهٔ گفتگو برای هر نشست (`ConversationChain` + `ConversationBufferMemory`)
+- endpoint سلامت (`GET /health`) که بدون کلید هم پاسخ می‌دهد
+- ثبت مکالمات در SQLite
+- آمادهٔ اجرا با Docker (ایمپورت به‌صورت `app.main:app`)
 
 ### روش اجرا
-1. کلون کنید و در پوشه پروژه `.env` بسازید:
-OPENAI_API_KEY=کلید خودتان
-2. اجرا با داکر کامپوز:
-docker-compose up --build
-3. مستندات و تست API:
-http://localhost:8000/docs
+1. نصب وابستگی‌ها:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+2. کلید را در محیط یا فایل `.env` بگذارید:
+```
+OPENAI_API_KEY=کلید-شما
+```
+3. اجرا:
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+4. مستندات و آزمون API: `http://127.0.0.1:8000/docs`
 
+### با داکر
+```bash
+docker compose up --build
+```
 
----
+حافظهٔ گفتگو داخل فرایند نگه داشته می‌شود و با ری‌استارت پاک می‌شود؛ جدول SQLite فعلاً ستون
+`session_id` ندارد.
 
 ## License
-MIT
 
+MIT
